@@ -7,6 +7,8 @@
 单个静态二进制，无运行时依赖，适合 ROM 空间和内存都紧张的路由器，
 同样可以直接跑在任意 Linux 发行版（Debian / Ubuntu / Alpine / NAS 系统等）上。
 
+![备份任务](docs/screenshot-jobs.png)
+
 ---
 
 ## 支持平台
