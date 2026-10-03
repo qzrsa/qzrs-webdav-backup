@@ -1,0 +1,20 @@
+- generic [ref=e1]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: W
+      - generic [ref=e7]:
+        - generic [ref=e8]: WebDAV 备份
+        - generic [ref=e9]: 路由器文件备份控制台
+    - generic [ref=e10]:
+      - generic [ref=e11]: 用户名
+      - textbox "用户名" [active] [ref=e12]: admin
+    - generic [ref=e13]:
+      - generic [ref=e14]: 密码
+      - textbox "密码" [ref=e15]
+    - button "登录" [ref=e16] [cursor=pointer]
+    - paragraph [ref=e17]:
+      - text: 用户名固定为
+      - code [ref=e18]: admin
+      - text: 。初始密码只在安装时显示一次， 也可以在设备上执行下列命令找回：
+      - code [ref=e19]: grep -A3 管理账号已创建 /etc/webdav-backup/service.log
+  - status
