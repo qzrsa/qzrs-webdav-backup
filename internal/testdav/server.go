@@ -37,6 +37,10 @@ type Server struct {
 	// does: incoming request paths carry the prefix and the hrefs inside
 	// PROPFIND multistatus responses include the full prefixed path.
 	PathPrefix string
+	// Gate, when non-nil, blocks every request until the channel is closed.
+	// Tests use it to pin a run in its claimed slot so assertions about
+	// concurrency are deterministic instead of racing the request flow.
+	Gate chan struct{}
 
 	mu     sync.Mutex
 	calls  map[string]int
@@ -65,6 +69,13 @@ func (s *Server) Calls(method string) int {
 
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.Gate != nil {
+			select {
+			case <-s.Gate:
+			case <-r.Context().Done():
+				return
+			}
+		}
 		s.mu.Lock()
 		s.calls[r.Method]++
 		shouldFail := s.failOn[r.Method] == s.calls[r.Method]

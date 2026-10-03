@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"sync"
 	"context"
 	"fmt"
 	"net/http/httptest"
@@ -376,6 +377,16 @@ func TestBackupRejectsConcurrentRunOfSameJob(t *testing.T) {
 	profileID := h.addProfile(t)
 	jobID := h.addJob(t, profileID, []string{src}, 0, true)
 
+	// Pin the first run inside its claimed slot: the gate holds the run's
+	// first request until the concurrent-rejection assertion below has been
+	// made, so the outcome no longer depends on how fast the first backup
+	// completes (it raced CI runners before the gate existed).
+	gate := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseGate := func() { releaseOnce.Do(func() { close(gate) }) }
+	h.srv.Gate = gate
+	defer releaseGate()
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -387,10 +398,15 @@ func TestBackupRejectsConcurrentRunOfSameJob(t *testing.T) {
 	for !h.runner.Running(jobID) && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
+	if !h.runner.Running(jobID) {
+		t.Fatal("first run never claimed its slot")
+	}
 	_, err := h.runner.Backup(context.Background(), jobID, engine.TriggerManual)
 	if err == nil {
 		t.Error("second concurrent run was accepted; expected ErrJobRunning")
 	}
+	releaseGate()
+	h.srv.Gate = nil
 	<-done
 }
 
@@ -443,6 +459,15 @@ func TestCancelStopsRunningBackup(t *testing.T) {
 	profileID := h.addProfile(t)
 	jobID := h.addJob(t, profileID, []string{src}, 0, true)
 
+	// Hold the run at its first request so it cannot finish before Cancel
+	// fires — otherwise this test degenerates into a race the CI runners
+	// occasionally lose.
+	gate := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseGate := func() { releaseOnce.Do(func() { close(gate) }) }
+	h.srv.Gate = gate
+	defer releaseGate()
+
 	done := make(chan *engine.Run, 1)
 	go func() {
 		run, _ := h.runner.Backup(context.Background(), jobID, engine.TriggerManual)
@@ -465,6 +490,8 @@ func TestCancelStopsRunningBackup(t *testing.T) {
 	if !canceled {
 		t.Fatal("job never appeared as running")
 	}
+	releaseGate()
+	h.srv.Gate = nil
 
 	select {
 	case run := <-done:
