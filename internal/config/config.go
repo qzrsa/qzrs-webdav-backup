@@ -141,10 +141,12 @@ type Config struct {
 type NotifyConfig struct {
 	// URL is the endpoint. For telegram it must be the full
 	// https://api.telegram.org/bot<token>/sendMessage; for bark it is the
-	// personal push base (https://api.day.app/<key>); for json/wecom it is
+	// personal push base (https://api.day.app/<key>); for gotify it is the
+	// server base (the app token goes in ChatID) — an URL that already
+	// carries /message?token=... is posted to verbatim; json/wecom are
 	// posted to verbatim.
 	URL       string `json:"url,omitempty"`
-	Format    string `json:"format,omitempty"` // "", "json", "bark", "wecom", "telegram"
+	Format    string `json:"format,omitempty"` // "", "json", "bark", "wecom", "telegram", "gotify"
 	ChatID    string `json:"chat_id,omitempty"`
 	OnSuccess bool   `json:"on_success"`
 	OnFailure bool   `json:"on_failure"`
@@ -191,9 +193,9 @@ func (c *Config) Validate() error {
 	}
 	if n := c.Notify; n != nil && n.URL != "" {
 		switch n.Format {
-		case "", "json", "bark", "wecom", "telegram":
+		case "", "json", "bark", "wecom", "telegram", "gotify":
 		default:
-			return errors.New("notify.format must be one of: json, bark, wecom, telegram")
+			return errors.New("notify.format must be one of: json, bark, wecom, telegram, gotify")
 		}
 		if n.Format == "telegram" && strings.TrimSpace(n.ChatID) == "" {
 			return errors.New("notify.chat_id is required for the telegram format")

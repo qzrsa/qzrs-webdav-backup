@@ -15,7 +15,7 @@ set -e
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 cd "$SCRIPT_DIR/.."
 
-VERSION=${VERSION:-1.1.2}
+VERSION=${VERSION:-1.1.3}
 OUT_DIR="dist"
 LDFLAGS="-s -w -X main.Version=$VERSION"
 

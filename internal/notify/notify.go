@@ -7,6 +7,7 @@
 //	bark     POST <base>/push {"title","body","group"}   (Bark / iOS)
 //	wecom    POST {"msgtype":"text","text":{"content"}}  (企业微信机器人)
 //	telegram POST {"chat_id","text"}                      (Bot API sendMessage)
+//	gotify   POST <base>/message?token=<app token> {"title","message","priority"}
 //
 // Delivery is best-effort by design: the engine fires it in the background
 // with a short timeout and logs failures without affecting the run record.
@@ -27,11 +28,12 @@ import (
 
 // Message is one task outcome ready for delivery.
 type Message struct {
-	Title  string // one-liner, e.g. "备份成功：Docker备份"
-	Body   string // detail lines
-	Status string // engine status string (success/partial/failed)
-	Job    string
-	RunID  string
+	Title   string // one-liner, e.g. "备份成功：Docker备份"
+	Body    string // detail lines
+	Status  string // engine status string (success/partial/failed)
+	Job     string
+	RunID   string
+	Success bool // true when Status is a success-like outcome
 }
 
 // Deliver posts msg to the configured endpoint. It is synchronous on purpose
@@ -88,6 +90,22 @@ func buildPayload(cfg config.NotifyConfig, msg Message) ([]byte, string, error) 
 		return marshal(map[string]string{
 			"chat_id": cfg.ChatID, "text": text,
 		}), strings.TrimSpace(cfg.URL), nil
+	case "gotify":
+		// Priority: 0 is default on most deployments; Android clients treat
+		// >=5 with higher importance, so failures ring, successes stay quiet.
+		priority := 3
+		if !msg.Success {
+			priority = 8
+		}
+		base := strings.TrimRight(strings.TrimSpace(cfg.URL), "/")
+		endpoint := base
+		if !strings.Contains(base, "/message") && !strings.Contains(base, "token=") {
+			// Convenience form: bare server base + app token in the token field.
+			endpoint = base + "/message?token=" + strings.TrimSpace(cfg.ChatID)
+		}
+		return marshal(map[string]any{
+			"title": msg.Title, "message": msg.Body, "priority": priority,
+		}), endpoint, nil
 	default:
 		return nil, "", fmt.Errorf("unknown notify format %q", cfg.Format)
 	}

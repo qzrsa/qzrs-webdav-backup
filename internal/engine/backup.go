@@ -202,6 +202,7 @@ func (r *Runner) notifyResult(run *Run) {
 		if err := notify.Deliver(ctx, *n, notify.Message{
 			Title: title, Body: body, Status: run.Status,
 			Job: run.JobName, RunID: run.ID,
+			Success: run.Status == config.StatusSuccess,
 		}); err != nil {
 			r.logf("notify: %v", err)
 		}

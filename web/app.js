@@ -2492,20 +2492,22 @@ async function renderSettings() {
             <input class="input mono" id="s-notify-url" value="${esc((settings.notify && settings.notify.url) || '')}"
               placeholder="https://…（留空关闭通知）">
             <p class="hint">支持 <b>bark</b>（填个人推送地址 https://api.day.app/你的key）、
-              <b>telegram</b>（填 https://api.telegram.org/bot&lt;token&gt;/sendMessage）、
+              <b>gotify</b>（填服务器地址，应用令牌填到下方附加栏；也可直接填完整
+              /message?token=… 地址）、<b>telegram</b>（填
+              https://api.telegram.org/bot&lt;token&gt;/sendMessage）、
               <b>wecom</b>（企业微信机器人地址）、<b>json</b>（任意接收 JSON POST 的地址）。</p>
           </div>
           <div class="field">
             <label class="label" for="s-notify-format">推送格式</label>
             <select class="input" id="s-notify-format">
-              ${['json','bark','wecom','telegram'].map((f) =>
+              ${['json','bark','wecom','telegram','gotify'].map((f) =>
                 `<option value="${f}" ${((settings.notify && settings.notify.format) || 'json') === f ? 'selected' : ''}>${f}</option>`).join('')}
             </select>
           </div>
           <div class="field">
-            <label class="label" for="s-notify-chatid">Telegram Chat ID</label>
+            <label class="label" for="s-notify-chatid">附加参数</label>
             <input class="input mono" id="s-notify-chatid" value="${esc((settings.notify && settings.notify.chat_id) || '')}"
-              placeholder="仅 telegram 格式需要">
+              placeholder="telegram: Chat ID；gotify: 应用令牌；其他格式留空">
           </div>
           <div class="field">
             <label class="label">触发时机</label>
