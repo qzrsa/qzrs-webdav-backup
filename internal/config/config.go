@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -119,18 +120,42 @@ type Admin struct {
 
 // Config is the whole persisted state.
 type Config struct {
-	Version         int       `json:"version"`
-	Listen          string    `json:"listen"`
-	DataDir         string    `json:"data_dir"`
-	SecretKey       string    `json:"secret_key"`
-	TempDir         string    `json:"temp_dir,omitempty"`
-	SessionTTLHours int       `json:"session_ttl_hours"`
-	HistoryKeep     int       `json:"history_keep"`
-	MaxConcurrent   int       `json:"max_concurrent"`
-	TrustedProxy    bool      `json:"trusted_proxy"`
-	Admin           Admin     `json:"admin"`
-	Profiles        []Profile `json:"profiles"`
-	Jobs            []Job     `json:"jobs"`
+	Version         int           `json:"version"`
+	Listen          string        `json:"listen"`
+	DataDir         string        `json:"data_dir"`
+	SecretKey       string        `json:"secret_key"`
+	TempDir         string        `json:"temp_dir,omitempty"`
+	SessionTTLHours int           `json:"session_ttl_hours"`
+	HistoryKeep     int           `json:"history_keep"`
+	MaxConcurrent   int           `json:"max_concurrent"`
+	TrustedProxy    bool          `json:"trusted_proxy"`
+	Notify          *NotifyConfig `json:"notify,omitempty"`
+	Admin           Admin         `json:"admin"`
+	Profiles        []Profile     `json:"profiles"`
+	Jobs            []Job         `json:"jobs"`
+}
+
+// NotifyConfig describes the optional webhook fired when a task finishes.
+// Four payload dialects are supported so the operator can point this at the
+// push service they already use without a transformer in between.
+type NotifyConfig struct {
+	// URL is the endpoint. For telegram it must be the full
+	// https://api.telegram.org/bot<token>/sendMessage; for bark it is the
+	// personal push base (https://api.day.app/<key>); for json/wecom it is
+	// posted to verbatim.
+	URL       string `json:"url,omitempty"`
+	Format    string `json:"format,omitempty"` // "", "json", "bark", "wecom", "telegram"
+	ChatID    string `json:"chat_id,omitempty"`
+	OnSuccess bool   `json:"on_success"`
+	OnFailure bool   `json:"on_failure"`
+}
+
+// EffectiveFormat returns the payload dialect, defaulting to generic JSON.
+func (n *NotifyConfig) EffectiveFormat() string {
+	if n.Format == "" {
+		return "json"
+	}
+	return n.Format
 }
 
 // Defaults returns a config pre-filled with sane router-friendly values.
@@ -143,6 +168,7 @@ func Defaults(dataDir string) *Config {
 		SessionTTLHours: 72,
 		HistoryKeep:     200,
 		MaxConcurrent:   1,
+		Notify:          &NotifyConfig{OnFailure: true},
 		Admin:           Admin{Username: "admin"},
 		Profiles:        []Profile{},
 		Jobs:            []Job{},
@@ -162,6 +188,20 @@ func (c *Config) Validate() error {
 	}
 	if c.SessionTTLHours <= 0 {
 		c.SessionTTLHours = 72
+	}
+	if n := c.Notify; n != nil && n.URL != "" {
+		switch n.Format {
+		case "", "json", "bark", "wecom", "telegram":
+		default:
+			return errors.New("notify.format must be one of: json, bark, wecom, telegram")
+		}
+		if n.Format == "telegram" && strings.TrimSpace(n.ChatID) == "" {
+			return errors.New("notify.chat_id is required for the telegram format")
+		}
+		if u, err := url.Parse(strings.TrimSpace(n.URL)); err != nil ||
+			(u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return errors.New("notify.url must be a valid http(s) address")
+		}
 	}
 	if c.HistoryKeep <= 0 {
 		c.HistoryKeep = 200

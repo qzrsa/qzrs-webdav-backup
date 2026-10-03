@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"context"
 	"errors"
 	"net/http"
@@ -626,6 +627,22 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleClearRuns wipes the entire execution history. Deleting while a task
+// is running would remove the record that run is actively writing, so refuse.
+func (s *Server) handleClearRuns(w http.ResponseWriter, r *http.Request) {
+	if running := s.runner.RunningJobs(); len(running) > 0 {
+		writeError(w, http.StatusConflict, "still_running",
+			fmt.Sprintf("有任务正在执行（%s），请等待完成后再清除", strings.Join(running, ", ")))
+		return
+	}
+	n, err := s.runner.History().ClearAll()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "clear_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": n})
 }
 
 // handleRunLog returns an increment of the run log for live tailing.

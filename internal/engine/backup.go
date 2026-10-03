@@ -19,6 +19,7 @@ import (
 	"github.com/qzrsa/qzrs-webdav-backup/internal/config"
 	"github.com/qzrsa/qzrs-webdav-backup/internal/dav"
 	"github.com/qzrsa/qzrs-webdav-backup/internal/freespace"
+	"github.com/qzrsa/qzrs-webdav-backup/internal/notify"
 )
 
 // ErrJobRunning is returned when the same job is already executing.
@@ -169,8 +170,42 @@ func (r *Runner) Backup(ctx context.Context, jobID, trigger string) (*Run, error
 		return nil
 	})
 	r.history.Prune(0)
+	r.notifyResult(run)
 
 	return run, nil
+}
+
+// notifyResult fires the optional completion webhook in the background. It
+// must never delay or fail the run itself: delivery errors are logged and
+// dropped, and the goroutine is bounded by the client timeout inside notify.
+func (r *Runner) notifyResult(run *Run) {
+	cfg := r.store.Snapshot()
+	n := cfg.Notify
+	if n == nil || strings.TrimSpace(n.URL) == "" {
+		return
+	}
+	if run.Status == config.StatusSuccess && !n.OnSuccess {
+		return
+	}
+	if run.Status != config.StatusSuccess && !n.OnFailure {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		title := fmt.Sprintf("备份%s：%s", statusZh(run.Status), run.JobName)
+		body := fmt.Sprintf("任务：%s\n结果：%s\n用时：%s",
+			run.JobName, statusZh(run.Status), time.Duration(run.DurationMS)*time.Millisecond)
+		if run.Message != "" {
+			body += "\n说明：" + run.Message
+		}
+		if err := notify.Deliver(ctx, *n, notify.Message{
+			Title: title, Body: body, Status: run.Status,
+			Job: run.JobName, RunID: run.ID,
+		}); err != nil {
+			r.logf("notify: %v", err)
+		}
+	}()
 }
 
 func (r *Runner) executeBackup(ctx context.Context, cfg *config.Config, job *config.Job,

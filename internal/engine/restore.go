@@ -215,6 +215,7 @@ func (r *Runner) Restore(ctx context.Context, req RestoreRequest) (*Run, error) 
 	lg.Printf("=== 结束：%s  用时 %s ===", statusZh(run.Status), time.Duration(run.DurationMS)*time.Millisecond)
 	_ = r.history.Save(run)
 	r.history.Prune(0)
+	r.notifyResult(run)
 	return run, nil
 }
 

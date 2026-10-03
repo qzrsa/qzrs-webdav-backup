@@ -287,6 +287,34 @@ func (h *History) Delete(id string) error {
 	return nil
 }
 
+// ClearAll removes every run record and its log. It is the backend of the
+// console's "清除全部" button; the API layer refuses to call it while a task is
+// still executing. Missing files on disk are not an error.
+func (h *History) ClearAll() (int, error) {
+	h.keepLock.Lock()
+	defer h.keepLock.Unlock()
+
+	ids := make([]string, 0, len(h.cache))
+	h.mu.RLock()
+	for id := range h.cache {
+		ids = append(ids, id)
+	}
+	h.mu.RUnlock()
+
+	removed := 0
+	var firstErr error
+	for _, id := range ids {
+		if err := h.Delete(id); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		removed++
+	}
+	return removed, firstErr
+}
+
 // Prune keeps the newest `keep` runs (0 uses the store default) and deletes the
 // rest along with their logs.
 func (h *History) Prune(keep int) int {

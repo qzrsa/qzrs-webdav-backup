@@ -138,6 +138,7 @@ func (s *Server) Handler() http.Handler {
 	auth("GET /api/runs", s.handleListRuns)
 	auth("GET /api/runs/{id}", s.handleGetRun)
 	auth("DELETE /api/runs/{id}", s.handleDeleteRun)
+	auth("DELETE /api/runs", s.handleClearRuns)
 	auth("GET /api/runs/{id}/log", s.handleRunLog)
 
 	auth("GET /api/archives", s.handleListArchives)
@@ -378,9 +379,10 @@ type settingsResponse struct {
 	SessionTTLHours int    `json:"session_ttl_hours"`
 	HistoryKeep     int    `json:"history_keep"`
 	MaxConcurrent   int    `json:"max_concurrent"`
-	TrustedProxy    bool   `json:"trusted_proxy"`
-	Username        string `json:"username"`
-	ConfigPath      string `json:"config_path"`
+	TrustedProxy    bool             `json:"trusted_proxy"`
+	Username        string           `json:"username"`
+	ConfigPath      string           `json:"config_path"`
+	Notify          *config.NotifyConfig `json:"notify,omitempty"`
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -396,15 +398,17 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		TrustedProxy:    cfg.TrustedProxy,
 		Username:        cfg.Admin.Username,
 		ConfigPath:      s.store.Path(),
+		Notify:          cfg.Notify,
 	})
 }
 
 type settingsUpdate struct {
-	TempDir         *string `json:"temp_dir"`
-	SessionTTLHours *int    `json:"session_ttl_hours"`
-	HistoryKeep     *int    `json:"history_keep"`
-	TrustedProxy    *bool   `json:"trusted_proxy"`
-	Username        *string `json:"username"`
+	TempDir         *string             `json:"temp_dir"`
+	SessionTTLHours *int                `json:"session_ttl_hours"`
+	HistoryKeep     *int                `json:"history_keep"`
+	TrustedProxy    *bool               `json:"trusted_proxy"`
+	Username        *string             `json:"username"`
+	Notify          *config.NotifyConfig `json:"notify"`
 }
 
 func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -429,6 +433,11 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Username != nil && strings.TrimSpace(*req.Username) != "" {
 			c.Admin.Username = strings.TrimSpace(*req.Username)
+		}
+		if req.Notify != nil {
+			req.Notify.URL = strings.TrimSpace(req.Notify.URL)
+			req.Notify.ChatID = strings.TrimSpace(req.Notify.ChatID)
+			c.Notify = req.Notify
 		}
 		return nil
 	}); err != nil {

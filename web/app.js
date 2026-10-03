@@ -1906,6 +1906,8 @@ async function renderRuns() {
             <button data-f="backup" class="${filter === 'backup' ? 'on' : ''}">备份</button>
             <button data-f="restore" class="${filter === 'restore' ? 'on' : ''}">恢复</button>
           </div>
+          <button class="btn btn-sm btn-danger" id="rn-clearall" ${runs.length ? '' : 'disabled'}
+            title="删除全部执行记录与日志">${icon('trash', 14)}清除全部</button>
           <button class="btn btn-sm" id="rn-refresh">${icon('refresh', 14)}刷新</button>
         </div>
       </div>
@@ -1952,6 +1954,21 @@ async function renderRuns() {
     if (!btn) return;
     S.runFilter = btn.dataset.f;
     route();
+  });
+
+  $('#rn-clearall', app)?.addEventListener('click', async () => {
+    const ok = await confirmModal({
+      title: '清除全部执行历史',
+      message: `将删除全部 ${runs.length} 条（含未显示的）执行记录及其日志，此操作不可恢复。`,
+      detail: '任务配置不受影响，仅清理执行历史。',
+      confirmText: '全部清除', danger: true,
+    });
+    if (!ok) return;
+    try {
+      const r = await api('/api/runs', { method: 'DELETE' });
+      toast(`已清除 ${r.deleted ?? runs.length} 条记录`, 'success');
+      await route();
+    } catch (err) { toast(err.message, 'error', '清除失败'); }
   });
 
   $$('[data-log]', app).forEach((b) =>
@@ -2452,7 +2469,7 @@ async function renderSettings() {
             <input class="input" id="s-cur" type="password" autocomplete="current-password">
           </div>
           <div class="field">
-            <label class="label" for="s-new">新密码（至少 8 位）</label>
+            <label class="label" for="s-new">新密码（至少 5 位）</label>
             <input class="input" id="s-new" type="password" autocomplete="new-password">
           </div>
           <div class="field">
@@ -2462,6 +2479,50 @@ async function renderSettings() {
         </div>
         <div class="toolbar" style="margin-top:12px">
           <button class="btn btn-primary" id="s-pass">${icon('key', 14)}修改密码</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>任务通知</h2></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="field">
+            <label class="label" for="s-notify-url">Webhook 地址</label>
+            <input class="input mono" id="s-notify-url" value="${esc((settings.notify && settings.notify.url) || '')}"
+              placeholder="https://…（留空关闭通知）">
+            <p class="hint">支持 <b>bark</b>（填个人推送地址 https://api.day.app/你的key）、
+              <b>telegram</b>（填 https://api.telegram.org/bot&lt;token&gt;/sendMessage）、
+              <b>wecom</b>（企业微信机器人地址）、<b>json</b>（任意接收 JSON POST 的地址）。</p>
+          </div>
+          <div class="field">
+            <label class="label" for="s-notify-format">推送格式</label>
+            <select class="input" id="s-notify-format">
+              ${['json','bark','wecom','telegram'].map((f) =>
+                `<option value="${f}" ${((settings.notify && settings.notify.format) || 'json') === f ? 'selected' : ''}>${f}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label class="label" for="s-notify-chatid">Telegram Chat ID</label>
+            <input class="input mono" id="s-notify-chatid" value="${esc((settings.notify && settings.notify.chat_id) || '')}"
+              placeholder="仅 telegram 格式需要">
+          </div>
+          <div class="field">
+            <label class="label">触发时机</label>
+            <label class="check">
+              <input type="checkbox" id="s-notify-fail" ${(!settings.notify || settings.notify.on_failure !== false) ? 'checked' : ''}>
+              <span class="check-text"><span class="check-title">失败时通知</span>
+              <span class="check-desc">备份或恢复失败时推送（建议开启）</span></span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="s-notify-ok" ${(settings.notify && settings.notify.on_success) ? 'checked' : ''}>
+              <span class="check-text"><span class="check-title">成功时通知</span>
+              <span class="check-desc">每次成功也推送，任务多时可能扰民</span></span>
+            </label>
+          </div>
+        </div>
+        <div class="toolbar" style="margin-top:12px">
+          <button class="btn btn-primary" id="s-notify-save">${icon('check', 14)}保存通知设置</button>
         </div>
       </div>
     </div>
@@ -2537,13 +2598,30 @@ async function renderSettings() {
     const nw = $('#s-new', app).value;
     const nw2 = $('#s-new2', app).value;
     if (!cur) { toast('请输入当前密码', 'warning'); return; }
-    if (nw.length < 8) { toast('新密码至少 8 位', 'warning'); return; }
+    if (nw.length < 5) { toast('新密码至少 5 位', 'warning'); return; }
     if (nw !== nw2) { toast('两次输入的新密码不一致', 'warning'); return; }
     try {
       await api('/api/password', { method: 'POST', body: { current: cur, new: nw } });
       toast('密码已修改', 'success');
       $('#s-cur', app).value = ''; $('#s-new', app).value = ''; $('#s-new2', app).value = '';
     } catch (err) { toast(err.message, 'error', '修改失败'); }
+  });
+
+  $('#s-notify-save', app).addEventListener('click', async () => {
+    const body = {
+      notify: {
+        url: $('#s-notify-url', app).value.trim(),
+        format: $('#s-notify-format', app).value,
+        chat_id: $('#s-notify-chatid', app).value.trim(),
+        on_failure: $('#s-notify-fail', app).checked,
+        on_success: $('#s-notify-ok', app).checked,
+      },
+    };
+    try {
+      await api('/api/settings', { method: 'PUT', body });
+      toast('通知设置已保存', 'success');
+      await route();
+    } catch (err) { toast(err.message, 'error', '保存失败'); }
   });
 
   $('#s-save', app).addEventListener('click', async () => {
