@@ -53,6 +53,9 @@ const ICONS = {
   hdd: '<path d="M21 12H3M6 16h.01M10 16h.01M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M10.9 12.1L21 2M18 5l3 3M15 8l2 2"/>',
   link: '<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  contrast: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>',
 };
 
 function icon(name, size = 15) {
@@ -393,12 +396,84 @@ function stopPolling() {
   if (S.pollTimer) { clearInterval(S.pollTimer); S.pollTimer = null; }
 }
 
+/* ------------------------------------------------------------------ 主题 */
+
+/* 三态：light（白天）/ dark（夜间）/ auto（跟随系统，实时解析）。
+   index.html 的内联脚本在页面加载前已按同一规则写过 data-theme，这里只负责
+   用户主动切换与系统外观变化时的实时跟随。 */
+
+const THEME_KEY = 'wdb-theme';
+const THEME_ORDER = ['light', 'dark', 'auto'];
+const THEME_META = {
+  light: { icon: 'sun',     label: '白天模式' },
+  dark:  { icon: 'moon',    label: '夜间模式' },
+  auto:  { icon: 'contrast', label: '跟随系统' },
+};
+
+function themeMode() {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    if (v === 'light' || v === 'dark' || v === 'auto') return v;
+  } catch { /* localStorage 不可用（隐私模式等）时退回 auto */ }
+  return 'auto';
+}
+
+function systemDark() {
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function applyTheme(mode) {
+  const resolved = mode === 'auto' ? (systemDark() ? 'dark' : 'light') : mode;
+  document.documentElement.dataset.theme = resolved;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', resolved === 'dark' ? '#14161a' : '#f4f5f7');
+}
+
+function setThemeMode(mode) {
+  try { localStorage.setItem(THEME_KEY, mode); } catch { /* 忽略，仅本次会话生效 */ }
+  applyTheme(mode);
+}
+
+/* 切换按钮：显示当前模式对应图标，点击按 白天 → 夜间 → 跟随系统 循环。 */
+function themeButtonHTML() {
+  const mode = themeMode();
+  const t = THEME_META[mode];
+  return `<button class="btn btn-ghost btn-icon" id="btn-theme" title="主题：${t.label}（点击切换）"
+            aria-label="切换主题，当前为${t.label}">${icon(t.icon, 16)}</button>`;
+}
+
+function bindThemeToggle() {
+  const btn = $('#btn-theme');
+  if (!btn) return;
+  const paint = (mode) => {
+    const t = THEME_META[mode];
+    btn.innerHTML = icon(t.icon, 16);
+    btn.title = `主题：${t.label}（点击切换）`;
+  };
+  paint(themeMode());
+  btn.addEventListener('click', () => {
+    const next = THEME_ORDER[(THEME_ORDER.indexOf(themeMode()) + 1) % THEME_ORDER.length];
+    setThemeMode(next);
+    // 直接换图标与提示，不整页重绘（重绘会把表单页里填了一半的内容冲掉）。
+    paint(next);
+  });
+}
+
+// 「跟随系统」时，系统在外观变化（如定时自动切深色）要实时生效。
+if (window.matchMedia) {
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const onSchemeChange = () => { if (themeMode() === 'auto') applyTheme('auto'); };
+  if (mq.addEventListener) mq.addEventListener('change', onSchemeChange);
+  else if (mq.addListener) mq.addListener(onSchemeChange); // 旧版 Safari
+}
+
 /* ------------------------------------------------------------------ 登录 */
 
 function renderLogin() {
   stopPolling();
   const app = $('#app');
   app.innerHTML = `
+    <button class="btn btn-ghost btn-icon theme-float" id="btn-theme"></button>
     <div class="login-wrap">
       <form class="login-card" id="login-form" autocomplete="off">
         <div class="login-brand">
@@ -464,6 +539,7 @@ function renderLogin() {
     }
   });
 
+  bindThemeToggle();
   setTimeout(() => $('#lg-user').focus(), 50);
 }
 
@@ -521,6 +597,7 @@ function renderShell(title, bodyHTML, actionsHTML = '') {
           <div class="topbar-spacer"></div>
           <div class="toolbar">
             ${actionsHTML}
+            ${themeButtonHTML()}
             <button class="btn btn-ghost btn-icon" id="btn-logout" title="退出登录">
               ${icon('logout', 16)}
             </button>
@@ -530,6 +607,7 @@ function renderShell(title, bodyHTML, actionsHTML = '') {
       </div>
     </div>`;
 
+  bindThemeToggle();
   $('#btn-logout').addEventListener('click', async () => {
     if (!await confirmModal({ title: '退出登录', message: '确定要退出当前会话吗？', confirmText: '退出' })) return;
     try { await api('/api/logout', { method: 'POST' }); } catch { /* ignore */ }

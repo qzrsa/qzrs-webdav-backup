@@ -6,6 +6,26 @@
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff">
 <title>QZRS-webdav-backup 控制台</title>
+<script>
+/*
+ * 主题预置（ES5，在 style.css 生效前执行，避免「先白后黑」闪屏）：
+ * 优先取用户上次选择（localStorage wdb-theme = light/dark/auto），没有就跟随系统。
+ * app.js 里的切换按钮后续可实时改 data-theme。
+ */
+(function () {
+  var mode = null;
+  try { mode = localStorage.getItem('wdb-theme'); } catch (e) { /* 隐私模式等 */ }
+  if (mode !== 'light' && mode !== 'dark' && mode !== 'auto') { mode = 'auto'; }
+  if (mode === 'auto') {
+    mode = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+      ? 'dark' : 'light';
+  }
+  var root = document.documentElement;
+  root.setAttribute('data-theme', mode);
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) { meta.setAttribute('content', mode === 'dark' ? '#14161a' : '#f4f5f7'); }
+})();
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Cpath d='M9 16.5l4 4 10-9' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/style.css">
 </head>

@@ -1,10 +1,13 @@
 /* ==========================================================================
    WebDAV 备份控制台 — 样式表
-   无外部依赖，浅色为主，跟随系统自动切换深色。
+   无外部依赖。主题由 <html data-theme="light|dark"> 驱动：
+   - index.html 的内联脚本在样式表加载前就按「用户选择 → 跟随系统」写入
+     data-theme，避免先白后黑的闪屏；
+   - app.js 里用户可在顶栏/登录页切换（白天 / 夜间 / 跟随系统），存 localStorage。
    ========================================================================== */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   --bg: #f4f5f7;
   --bg-subtle: #eceef1;
@@ -33,6 +36,8 @@
   --neutral: #556070;
   --neutral-soft: #eef0f3;
 
+  --backdrop: rgba(16, 20, 26, .5);
+
   --radius-sm: 6px;
   --radius: 9px;
   --radius-lg: 13px;
@@ -52,37 +57,41 @@
   --header-h: 56px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14161a;
-    --bg-subtle: #191c21;
-    --surface: #1c2026;
-    --surface-2: #21252c;
-    --surface-3: #272c34;
-    --border: #2e343d;
-    --border-strong: #3d444f;
+/* 夜间主题：由 JS 把 data-theme 解析成 light/dark 后生效（auto 模式也由 JS
+   监听系统变化实时解析，CSS 只认最终值，避免媒体查询块与选择器块双份维护）。 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
-    --text: #e8ebef;
-    --text-2: #a8b0bb;
-    --text-3: #6f7884;
+  --bg: #14161a;
+  --bg-subtle: #191c21;
+  --surface: #1c2026;
+  --surface-2: #21252c;
+  --surface-3: #272c34;
+  --border: #2e343d;
+  --border-strong: #3d444f;
 
-    --primary: #5b8cf7;
-    --primary-hover: #7ba3f9;
-    --primary-soft: #1b2437;
-    --primary-ring: rgba(91, 140, 247, .32);
+  --text: #e8ebef;
+  --text-2: #a8b0bb;
+  --text-3: #6f7884;
 
-    --success: #4ade80;
-    --success-soft: #14291c;
-    --warning: #fbbf24;
-    --warning-soft: #2b2312;
-    --danger: #f87171;
-    --danger-hover: #fca5a5;
-    --danger-soft: #2c1a1a;
-    --neutral: #9aa3b0;
-    --neutral-soft: #252a32;
+  --primary: #5b8cf7;
+  --primary-hover: #7ba3f9;
+  --primary-soft: #1b2437;
+  --primary-ring: rgba(91, 140, 247, .32);
 
-    --shadow-lg: 0 16px 44px rgba(0, 0, 0, .55);
-  }
+  --success: #4ade80;
+  --success-soft: #14291c;
+  --warning: #fbbf24;
+  --warning-soft: #2b2312;
+  --danger: #f87171;
+  --danger-hover: #fca5a5;
+  --danger-soft: #2c1a1a;
+  --neutral: #9aa3b0;
+  --neutral-soft: #252a32;
+
+  --backdrop: rgba(0, 0, 0, .62);
+
+  --shadow-lg: 0 16px 44px rgba(0, 0, 0, .55);
 }
 
 * { box-sizing: border-box; }
@@ -670,7 +679,7 @@ table.table {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(16, 20, 26, .5);
+  background: var(--backdrop);
   backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
@@ -773,6 +782,13 @@ table.table {
 .toast-msg { color: var(--text-2); word-break: break-word; }
 
 /* ---------- 登录页 ---------- */
+
+.theme-float {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 50;
+}
 
 .login-wrap {
   min-height: 100vh;
