@@ -240,11 +240,23 @@ func (c *Client) newRequest(ctx context.Context, method, remote string, body io.
 	return req, nil
 }
 
+// maxMetaTimeout caps metadata operations independently of the profile
+// timeout. Large uploads need a long ResponseHeaderTimeout (netdisk
+// aggregators may take minutes before answering a PUT), but that value must
+// not apply to PROPFIND and friends: with timeout_sec=3600 a hung server used
+// to stall every metadata call for a full hour. Downloads and uploads do not
+// go through metaContext and keep the full profile timeout.
+const maxMetaTimeout = 2 * time.Minute
+
 func (c *Client) metaContext(parent context.Context) (context.Context, context.CancelFunc) {
 	if parent == nil {
 		parent = context.Background()
 	}
-	return context.WithTimeout(parent, c.timeout)
+	t := c.timeout
+	if t > maxMetaTimeout {
+		t = maxMetaTimeout
+	}
+	return context.WithTimeout(parent, t)
 }
 
 // do executes a request and turns transport errors into readable messages.
@@ -666,6 +678,44 @@ func (c *Client) DownloadToFile(ctx context.Context, remotePath, localPath strin
 		return 0, copyErr
 	}
 	return written, nil
+}
+
+// ReadRange fetches the first n bytes of a remote file. Used to verify that an
+// upload actually landed on the storage: cloud aggregators (OpenList + netdisk
+// drivers) sometimes answer PUT with 201 while the transfer silently dies
+// server-side, and the only way to tell is to read something back. A server
+// that ignores the Range header answers 200 with the full body — the returned
+// slice is capped at n bytes either way. A non-2xx answer (some servers refuse
+// Range outright) is returned as an error so the caller can decide whether to
+// skip the check instead of failing the backup.
+func (c *Client) ReadRange(parent context.Context, remotePath string, n int64) ([]byte, error) {
+	ctx, cancel := c.metaContext(parent)
+	defer cancel()
+	req, err := c.newRequest(ctx, http.MethodGet, remotePath, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", n-1))
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer drainClose(resp.Body)
+
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusPartialContent:
+	default:
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, statusError("GET "+displayPath(remotePath), resp)
+	}
+	buf := make([]byte, n)
+	got, readErr := io.ReadFull(io.LimitReader(resp.Body, n), buf)
+	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+		return nil, fmt.Errorf("dav: read %s: %w", displayPath(remotePath), readErr)
+	}
+	return buf[:got], nil
 }
 
 // Delete removes a remote file or collection.

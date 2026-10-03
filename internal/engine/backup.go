@@ -18,6 +18,7 @@ import (
 	"github.com/qzrsa/qzrs-webdav-backup/internal/archive"
 	"github.com/qzrsa/qzrs-webdav-backup/internal/config"
 	"github.com/qzrsa/qzrs-webdav-backup/internal/dav"
+	"github.com/qzrsa/qzrs-webdav-backup/internal/freespace"
 )
 
 // ErrJobRunning is returned when the same job is already executing.
@@ -259,6 +260,9 @@ func (r *Runner) executeBackup(ctx context.Context, cfg *config.Config, job *con
 		}
 		run.ArchiveSize = uploaded
 		lg.Printf("      已上传 %s", humanBytes(uploaded))
+		if err := verifyRemoteContent(ctx, client, remotePath, archiveExt(job.Options.Compression), lg); err != nil {
+			return err
+		}
 		// Streamed archives cannot report detailed statistics; re-derive what
 		// we can from the counters the caller tracked.
 		stats = &archive.Stats{Files: run.FileCount, TotalBytes: run.RawSize}
@@ -272,6 +276,19 @@ func (r *Runner) executeBackup(ctx context.Context, cfg *config.Config, job *con
 		defer func() { _ = os.Remove(stagingPath) }()
 
 		lg.Printf("[3/5] 打包到本地暂存：%s", stagingPath)
+		// Pre-flight the staging volume: dying at second zero with an
+		// actionable message beats dying halfway through a multi-GB archive
+		// with a raw ENOSPC (the 415 MB overlay-partition incident).
+		if free, err := freespace.Available(tempDir); err == nil {
+			lg.Printf("      暂存目录可用空间：%s", humanBytes(int64(free)))
+			switch {
+			case free < 64<<20:
+				return fmt.Errorf("暂存目录 %s 可用空间不足 %s，请把任务的「暂存目录」指向容量更大的分区",
+					tempDir, humanBytes(64<<20))
+			case free < 512<<20:
+				lg.Printf("      警告：暂存空间紧张（不足 %s），若备份体积超过它将中途失败", humanBytes(512<<20))
+			}
+		}
 		stats, manifest, err = r.createArchive(ctx, stagingPath, opts, progress, lg)
 		if err != nil {
 			return err
@@ -302,11 +319,16 @@ func (r *Runner) executeBackup(ctx context.Context, cfg *config.Config, job *con
 			humanBytes(uploaded), time.Since(up).Round(time.Second), rate)
 
 		// Verify what landed on the server.
+		if err := verifyRemoteContent(ctx, client, remotePath, archiveExt(job.Options.Compression), lg); err != nil {
+			return err
+		}
 		if st, err := client.Stat(ctx, remotePath); err == nil && st.Size > 0 && st.Size != uploaded {
 			lg.Printf("      警告：远端报告大小 %s 与本地 %s 不一致，请检查服务端配额或压缩传输",
 				humanBytes(st.Size), humanBytes(uploaded))
 		} else if err == nil {
 			lg.Printf("      校验通过：远端文件大小一致")
+		} else {
+			lg.Printf("      警告：无法读取远端文件信息，大小校验已跳过（%v）", err)
 		}
 	}
 
@@ -347,6 +369,38 @@ func (r *Runner) executeBackup(ctx context.Context, cfg *config.Config, job *con
 	if errLater := ctx.Err(); errLater != nil {
 		return fmt.Errorf("任务被取消：%w", errLater)
 	}
+	return nil
+}
+
+// verifyRemoteContent reads back the first bytes of the uploaded archive and
+// checks the file signature. A 201 from cloud aggregators is not proof the
+// file reached the netdisk — some drivers answer 201 while the transfer dies
+// server-side (observed with the China Mobile driver on 2026-10-03) — so we
+// sample what actually landed. A server that cannot serve the readback at all
+// only produces a warning: an unsupported check must not fail a backup that
+// otherwise succeeded.
+func verifyRemoteContent(ctx context.Context, client *dav.Client, remotePath, ext string, lg *RunLogger) error {
+	need := int64(16)
+	if ext == ".tar" {
+		need = 512 // the "ustar" magic lives at offset 257
+	}
+	data, err := client.ReadRange(ctx, remotePath, need)
+	if err != nil {
+		lg.Printf("      警告：回读校验不可用（%v），已跳过", err)
+		return nil
+	}
+	ok := false
+	switch ext {
+	case ".tar.gz":
+		ok = len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b
+	case ".tar":
+		ok = len(data) >= 262 && string(data[257:262]) == "ustar"
+	}
+	if !ok {
+		return fmt.Errorf("回读校验失败：远端内容不是有效的%s（读到 %d 字节）——上传可能被网盘静默丢弃",
+			ext, len(data))
+	}
+	lg.Printf("      回读校验通过：远端内容为有效%s", ext)
 	return nil
 }
 

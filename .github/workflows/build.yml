@@ -1,0 +1,73 @@
+name: build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Static analysis
+        run: go vet ./...
+
+      - name: Frontend self-check
+        run: node scripts/check_frontend.js
+
+      # Mirrors deploy/build.sh: five-step gate then five architectures, but
+      # with the local Go wrapper replaced by the CI toolchain.
+      - name: Cross-compile & package
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          [ "$VERSION" = "$GITHUB_REF_NAME" ] && VERSION=1.1.1
+          TARGETS="linux/amd64 linux/arm64 linux/arm linux/mipsle linux/mips"
+          mkdir -p dist
+          for target in $TARGETS; do
+            os=${target%/*}; arch=${target#*/}
+            name="qzrs-webdav-backup-$VERSION-$os-$arch"
+            [ "$arch" = "arm" ] && name="$name-v7"
+            echo "building $name"
+            GOOS=$os GOARCH=$arch GOARM=7 GOMIPS=softfloat \
+              go build -trimpath -ldflags "-s -w -X main.Version=$VERSION" \
+              -o "dist/$name" .
+            stage="dist/.stage-$os-$arch"
+            rm -rf "$stage"; mkdir -p "$stage"
+            cp "dist/$name" "$stage/qzrs-webdav-backup"
+            cp deploy/qzrs-webdav-backup.init "$stage/qzrs-webdav-backup.init"
+            cp deploy/install.sh deploy/uninstall.sh README.md LICENSE "$stage/"
+            python scripts/pack.py --stage "$stage" \
+              --out "dist/$name.tar.gz" --bin-name qzrs-webdav-backup
+            rm -rf "$stage"
+          done
+          ls -lh dist/*.tar.gz
+
+      - name: Upload artifacts (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*.tar.gz
+
+      - name: Attach release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          generate_release_notes: true
